@@ -1,0 +1,15 @@
+[package]
+name = "horizon"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.81"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.115"
+tokio = { version = "1.37.0", features = ["fs", "sync", "bytes", "rt-multi-thread", "parking_lot", "time", "net", "process", "signal", "macros"] }
+uuid = { version = "1.8.0", features = ["serde", "v5", "v4"] }
+small-gcs = { path = "../mysticetus-rs/crates/small-gcs" }
+futures = "0.3.30"

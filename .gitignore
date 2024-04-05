@@ -1,0 +1,9 @@
+/target
+/data
+/examples
+__pycache__
+
+/tfrecords
+*json
+*txt
+/images
