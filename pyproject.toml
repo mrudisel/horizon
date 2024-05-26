@@ -6,13 +6,12 @@ authors = ["mrudisel <mitchrudisel@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
-tensorflow = "^2.16.1"
-numpy = "^1.26.4"
+python = ">=3.11,<3.12"
 matplotlib = "^3.8.4"
 pillow = "^10.3.0"
 pydantic = "^2.6.4"
 tqdm = "^4.66.2"
+tensorflow = "~2.12"
 
 
 [build-system]

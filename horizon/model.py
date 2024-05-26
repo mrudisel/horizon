@@ -1,4 +1,6 @@
 import tensorflow as tf
+tf.debugging.disable_traceback_filtering()
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -46,28 +48,52 @@ def UpBlock(width, block_depth):
 
 
 
-def get_network(shape=[1080, 1920, 3], widths=[64, 96, 128, 256], block_depth = 4):
+def get_network(
+    shape=[1080, 1920, 3], 
+    block_depth=2, 
+    conv_units=32,
+    pool_size=2,
+    pool_every=1,
+):
     images = tf.keras.Input(shape=shape)
 
-    x = tf.keras.layers.Conv2D(widths[0], kernel_size=1)(images)
+    x = tf.keras.layers.Conv2D(conv_units, kernel_size=3, activation="relu")(images)
+    x = tf.keras.layers.AveragePooling2D(pool_size=pool_size)(x)
 
-    skips = []
-    for width in widths[:-1]:
-        x = DownBlock(width, block_depth)([x, skips])
+    # skips = []
+    # for width in widths[:-1]:
+    #     x = DownBlock(width, block_depth)([x, skips])
 
-    for _ in range(block_depth):
-        x = ResidualBlock(widths[-1])(x)
+    # for _ in range(block_depth):
+    #    x = ResidualBlock(widths[-1])(x)
 
-    for width in reversed(widths[:-1]):
-        x = UpBlock(width, block_depth)([x, skips])
+    # for width in reversed(widths[:-1]):
+    #     x = UpBlock(width, block_depth)([x, skips])
 
-    x = tf.keras.layers.Conv2D(3, kernel_size=1, kernel_initializer="zeros", dtype=tf.float32)(x)
+    for i in range(block_depth):
+        resid = x 
+        x = tf.keras.layers.BatchNormalization(center=False, scale=False)(x)
+        x = tf.keras.layers.Conv2D(
+            conv_units, kernel_size=3, padding="same", activation=tf.keras.activations.swish
+        )(x)
+        x = tf.keras.layers.Conv2D(conv_units, kernel_size=3, padding="same")(x)
+        x = tf.keras.layers.Add()([x, resid])
+        
+        if i % pool_every == 0:
+            x = tf.keras.layers.AveragePooling2D(pool_size=pool_size)(x)
 
+
+    x = tf.keras.layers.Conv2D(conv_units / 2, kernel_size=3, padding="same")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=pool_size)(x)
+    x = tf.keras.layers.Conv2D(conv_units / 4, kernel_size=3, padding="same")(x)
+
+    if (block_depth - 1) % pool_every != 0:
+        x = tf.keras.layers.AveragePooling2D(pool_size=pool_size)(x)
+    
     x = tf.keras.layers.Flatten(dtype=tf.float32)(x)
 
-    x = tf.keras.layers.Dense(512, activation="relu", kernel_initializer="zeros")(x)
-    x = tf.keras.layers.Dense(256, activation="relu", kernel_initializer="zeros")(x)
     x = tf.keras.layers.Dense(128, activation="relu", kernel_initializer="zeros")(x)
+    x = tf.keras.layers.Dense(64, activation="relu", kernel_initializer="zeros")(x)
     x = tf.keras.layers.Dense(32, activation="relu", kernel_initializer="zeros")(x)
     x = tf.keras.layers.Dense(6, activation="relu", kernel_initializer="zeros")(x)
 

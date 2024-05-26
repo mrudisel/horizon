@@ -1,5 +1,7 @@
 from typing import Dict, List, Generator, Tuple, Optional
 import tensorflow as tf
+tf.debugging.disable_traceback_filtering()
+
 import numpy as np
 import os 
 import json
@@ -12,6 +14,10 @@ import PIL
 from pydantic import BaseModel
 
 DESCRIPTOR_FILE = "horizons.json"
+
+IMAGE_SHAPE = (1080, 1920, 3)
+
+SAMPLES = 3768
 
 SCHEMA = {
     'height': tf.io.FixedLenFeature([1], dtype=tf.int64),
@@ -83,14 +89,14 @@ class Horizon(BaseModel):
         )
 
     def to_example(self) -> tf.train.Example:
-        image = tf.io.read_file(self.path)
-        image_shape = tf.io.decode_image(image).shape
+        raw_image = tf.io.read_file(self.path)
+        image = tf.io.decode_image(raw_image)
 
         feature = {
-            'height': _int64_feature(image_shape[0]),
-            'width': _int64_feature(image_shape[1]),
-            'depth': _int64_feature(image_shape[2]),
-            "raw_image": _bytes_feature(image),
+            'height': _int64_feature(image.shape[0]),
+            'width': _int64_feature(image.shape[1]),
+            'depth': _int64_feature(image.shape[2]),
+            "raw_image": _bytes_feature(raw_image),
             "horizon": tf.train.Feature(float_list=tf.train.FloatList(value=self.to_list()))
         }
         
@@ -107,10 +113,11 @@ def descriptors() -> Generator[Horizon, None, None]:
 
 
 
-def write_tf_record():
+def write_tf_record() -> int:
     horizons = descriptors()
 
     chunk = 0
+    examples = 0
     while True:
         written = 0
         dst = f"tfrecords/chunk_{chunk}.tfrecord"
@@ -119,6 +126,7 @@ def write_tf_record():
                 example = horiz.to_example()
                 s = example.SerializeToString()
                 writer.write(s)
+                examples += 1
 
                 written += len(s)
                 if written > (100 * 1024 * 1024):
@@ -129,34 +137,71 @@ def write_tf_record():
             break
         chunk += 1
 
+    return examples
+
 
 
 def get_tfrecord_files() -> List[str]:
     return [f"tfrecords/{f}" for f in os.listdir("tfrecords")]
 
 
+
+def decode(s): 
+    rec = tf.io.parse_single_example(s, SCHEMA)
+    image = tf.io.decode_image(rec["raw_image"], expand_animations=False)
+    horizon = rec["horizon"]
+
+    tf.ensure_shape(image, IMAGE_SHAPE)
+    tf.ensure_shape(horizon, [6])
+    
+    return (image, horizon)
+
+
+def build_decode_resize(resize_shape: Tuple[int, int, int]): 
+    shape = (resize_shape[0], resize_shape[1])
+    def decode_resize(s):
+        image, horizon = decode(s)
+        image = tf.image.resize(image, shape, preserve_aspect_ratio=True)
+        return (image, horizon)
+
+    return decode_resize
+
+def cast_images(img, horizon):
+    img = tf.image.convert_image_dtype(img, tf.float32)
+    return (img, horizon)
+
+
 def load_datasets(
     files: Optional[List[str]] = None, 
-    batch_size: int = 8, 
-) -> tf.data.Dataset:
-    @tf.py_function(Tout=[tf.float32, tf.float32])
-    def decode(s): 
-        rec = tf.io.parse_single_example(s, SCHEMA)
-        image = tf.io.decode_image(rec["raw_image"])
-        image = tf.image.convert_image_dtype(image, tf.float32)
-        horizon = rec["horizon"]
-        return (image, horizon)
+    resize: float = 1,
+) -> Tuple[tf.data.Dataset, Tuple[int, int, int]]:
 
     if files is None:
         files = get_tfrecord_files()
 
-    return (
+    if resize == 1:
+        output_shape = IMAGE_SHAPE
+        decode_fn = decode
+    else:
+        output_shape = (
+            int(np.floor(IMAGE_SHAPE[0] * resize)),
+            int(np.floor(IMAGE_SHAPE[1] * resize)),
+            IMAGE_SHAPE[-1],
+        )
+        decode_fn = build_decode_resize(output_shape)
+        print(f"resizing images to {output_shape}")
+
+
+    ds = (
         tf.data.TFRecordDataset(files)
-            .map(decode)
-            .batch(batch_size=batch_size)
-            .prefetch(tf.data.AUTOTUNE)
+            .shuffle(len(files))
+            .map(decode_fn)
+            .map(cast_images)
     )
+
+    return (ds, output_shape)
 
 
 if __name__ == "__main__":
-    write_tf_record()
+    examples = write_tf_record()
+    print(f"wrote out {examples} examples")
